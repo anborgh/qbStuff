@@ -1,10 +1,10 @@
 ﻿/**
  * Скрипт стикеров
  * автор: Человек-Шаман
- * version: 1.0.7
+ * version: 1.0.8
  *
  * Что нового:
- * 1. Фикс адресов сохранённых стикеров с forumupload.ru на upforme.ru
+ * 1. Фикс совместимости со скриптом визуального редактора
  */
 const hvStickerPack = {
   loading: false,
@@ -89,14 +89,14 @@ const hvStickerPack = {
     const open = typeof isOpened !== "undefined" ? Boolean(isOpened) : !this.isOpened;
 
     if (open) {
-      const offset = $("#main-reply").offset() || $("#post-form").offset();
+      const offset = $("#wysi-reply:visible,#main-reply:visible").offset() || $("#post-form").offset();
       this.modalContainer.css({
         position: "absolute",
         top: offset.top,
         left: offset.left
       });
       this.modal.css({
-        width: $("#main-reply").width() || $("#post-form").width(),
+        width: $("#wysi-reply:visible,#main-reply:visible").width() || $("#post-form").width(),
       });
 
       this.setTab(this.activeTab);
