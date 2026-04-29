@@ -1,12 +1,13 @@
 ﻿#button-sticker {
-    background: url(https://i.imgur.com/VzyJif6.png) 50% no-repeat;
+    background: url('https://i.imgur.com/VzyJif6.png') 50% no-repeat;
     background-size: contain;
     cursor: pointer;
 }
 
 #button-sticker.loading {
-    background: url(https://i.imgur.com/JH5zFVY.gif) 50% no-repeat;
-};
+    background: url('https://i.imgur.com/JH5zFVY.gif') 50% no-repeat;
+    background-size: 60%;
+}
 
 .hvStickerPackModalContainer {
     position: absolute;
@@ -85,7 +86,17 @@
 
 .hvStickerPackModalContent img {
     max-height: 80px;
+    max-width: 200px;
     cursor: pointer;
+}
+
+.hvStickerPackModalContent.hidden {
+    display: none;
+}
+
+.hvStickerPackModalContent.hvStickerPackModalBulk textarea {
+    width: 100%;
+    margin-bottom: 12px;
 }
 
 .hvStickerPackItem {
@@ -126,8 +137,8 @@
 
 .hvStickerPackRemoveItem {
     position: absolute;
-    top: 0px;
-    right: 0px;
+    top: 0;
+    right: 0;
     display: inline-block;
     background: #d5d5d5;
     z-index: 2;

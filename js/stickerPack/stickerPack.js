@@ -1,10 +1,11 @@
 ﻿/**
  * Скрипт стикеров
  * автор: Человек-Шаман
- * version: 1.0.8
+ * version: 1.0.9
  *
  * Что нового:
- * 1. Фикс совместимости со скриптом визуального редактора
+ * 1. Добавлен режим редактирования списка стикеров
+ * 2. Добавлен drag and drop для сортировки своих стикеров
  */
 const hvStickerPack = {
   loading: false,
@@ -12,6 +13,11 @@ const hvStickerPack = {
   userData: [],
   isOpened: false,
   activeTab: '',
+  isCustomEditMode: false,
+  dragLongPressMs: 400,
+  dragState: null,
+  dragStartTimer: null,
+  suppressStickerClick: false,
 
   init: function (url) {
     if ($("#button-smile").length === 0) return;
@@ -22,13 +28,24 @@ const hvStickerPack = {
     this.handleTabsClick = this.handleTabsClick.bind(this);
     this.handleOutsideClick = this.handleOutsideClick.bind(this);
     this.handleAddButtonClick = this.handleAddButtonClick.bind(this);
+    this.handleToggleCustomEditMode = this.handleToggleCustomEditMode.bind(this);
+    this.handleSaveCustomEditMode = this.handleSaveCustomEditMode.bind(this);
+    this.handleCancelCustomEditMode = this.handleCancelCustomEditMode.bind(this);
     this.handleContentClick = this.handleContentClick.bind(this);
+    this.handleStickerPressStart = this.handleStickerPressStart.bind(this);
+    this.handleStickerPressMove = this.handleStickerPressMove.bind(this);
+    this.handleStickerPressEnd = this.handleStickerPressEnd.bind(this);
+    this.handleStickerPressCancel = this.handleStickerPressCancel.bind(this);
+    this.startDraggingSticker = this.startDraggingSticker.bind(this);
+    this.applyUserDataOrderFromDom = this.applyUserDataOrderFromDom.bind(this);
+    this.getEventPoint = this.getEventPoint.bind(this);
+    this.clearDragStartTimer = this.clearDragStartTimer.bind(this);
     this.closeModal = this.closeModal.bind(this);
     this.addStyle();
     this.addButton();
   },
   addStyle: function () {
-    const style = $('<link rel="stylesheet" href="https://forumstatic.ru/files/0019/37/10/94202.css">');
+    const style = $('<link rel="stylesheet" href="https://forumstatic.ru/files/0017/95/29/89523.css">');
     $("head").append(style);
   },
   addButton: function () {
@@ -55,10 +72,28 @@ const hvStickerPack = {
     this.addStickerButton = $(
       '<input class="hvStickerPackModalAddButton" type="button" value="+">'
     );
+    this.editModeButton = $(
+      '<input class="hvStickerPackModalAddButton hvStickerPackModalEditButton" type="button" value="\u{270e}">'
+    );
+    this.bulkContainer = $('<div class="hvStickerPackModalContent hvStickerPackModalBulk hidden"></div>');
+    this.bulkInput = $(
+      '<textarea class="hvStickerPackModalInput hvStickerPackModalTextarea" rows="6" placeholder="Вставь URL стикеров (по одному в строке или через пробел)"></textarea>'
+    );
+    this.bulkSaveButton = $(
+      '<input class="hvStickerPackModalAddButton hvStickerPackModalSaveButton" type="button" value="Сохранить">'
+    );
+    this.bulkCancelButton = $(
+      '<input class="hvStickerPackModalAddButton hvStickerPackModalCancelButton" type="button" value="Отмена">'
+    );
+    this.bulkContainer.append(this.bulkInput);
+    this.bulkContainer.append(this.bulkSaveButton);
+    this.bulkContainer.append(this.bulkCancelButton);
     this.addContainer.append(this.stickerInput);
     this.addContainer.append(this.addStickerButton);
+    this.addContainer.append(this.editModeButton);
 
     this.modal.append(this.modalContent);
+    this.modal.append(this.bulkContainer);
     this.modal.append(this.addContainer);
     this.modal.append(this.modalTabs);
     this.modalContainer.append(this.modal);
@@ -78,6 +113,9 @@ const hvStickerPack = {
     this.modalTabs.on("click", this.handleTabsClick);
     this.modalContent.on("click", this.handleContentClick);
     this.addStickerButton.on("click", this.handleAddButtonClick);
+    this.editModeButton.on("click", this.handleToggleCustomEditMode);
+    this.bulkSaveButton.on("click", this.handleSaveCustomEditMode);
+    this.bulkCancelButton.on("click", this.handleCancelCustomEditMode);
 
     $("body").append(this.modalContainer);
     this.toggleModal(true);
@@ -85,43 +123,13 @@ const hvStickerPack = {
   closeModal: function () {
     this.toggleModal(false);
   },
-  toggleModal: function (isOpened) {
-    const open = typeof isOpened !== "undefined" ? Boolean(isOpened) : !this.isOpened;
-
-    if (open) {
-      const offset = $("#wysi-reply:visible,#main-reply:visible").offset() || $("#post-form").offset();
-      this.modalContainer.css({
-        position: "absolute",
-        top: offset.top,
-        left: offset.left
-      });
-      this.modal.css({
-        width: $("#wysi-reply:visible,#main-reply:visible").width() || $("#post-form").width(),
-      });
-
-      this.setTab(this.activeTab);
-      $(document).on("click", this.handleOutsideClick);
-      $(document).on("pun_post", this.closeModal);
-      $(document).on("pun_preview", this.closeModal);
-      $(document).on("pun_preedit", this.closeModal);
-      $(document).on("pun_edit", this.closeModal);
-      $(document).on("messenger:post", this.closeModal);
-    } else {
-      $(document).off("pun_post", this.closeModal);
-      $(document).off("pun_preview", this.closeModal);
-      $(document).off("pun_preedit", this.closeModal);
-      $(document).off("pun_edit", this.closeModal);
-      $(document).off("messenger:post", this.closeModal);
-      $(document).off("click", this.handleOutsideClick);
-    }
-
-    this.modal.toggleClass("active", open);
-    this.isOpened = open;
-  },
   setTab: function (tabName) {
     const self = this;
     this.activeTab = tabName;
     const isCustomTab = this.activeTab === "Свои";
+    if (!isCustomTab) {
+      this.resetCustomEditMode();
+    }
     $(this.modalTabs)
       .find(".hvStickerPackModalTab")
       .removeClass("active");
@@ -141,13 +149,19 @@ const hvStickerPack = {
         ? '<span class="hvStickerPackRemoveItem" title="Удалить">x</span>'
         : '';
       $(self.modalContent).append(
-        `<div class="hvStickerPackItem" data-sticker="${url}"><img src="${url}" onClick="smile('[img]${url}[/img]')">${removeButton}</div>`
+        `<div class="hvStickerPackItem" data-sticker="${url}"><img src="${url}">${removeButton}</div>`
       );
     });
     this.toggleAddTab(isCustomTab);
   },
   toggleAddTab: function (isCustom) {
-    this.addContainer.toggleClass("hidden", !isCustom);
+    const isBulkMode = isCustom && this.isCustomEditMode;
+    this.addContainer.toggleClass("hidden", !isCustom || isBulkMode);
+    this.bulkContainer.toggleClass("hidden", !isBulkMode);
+    this.modalContent.toggleClass("hidden", isBulkMode);
+    if (isBulkMode) {
+      $(this.bulkInput).val(this.userData.join("\n"));
+    }
   },
   setLoading: function (isLoading) {
     this.loading = Boolean(isLoading);
@@ -218,11 +232,22 @@ const hvStickerPack = {
       this.userData.splice(index, 1);
       this.setTab("Свои");
       this.setUserData();
+      return;
+    }
+
+    const sticker = $(event.target).closest(".hvStickerPackItem");
+    if (sticker.length && this.activeTab === "Свои" && this.suppressStickerClick) {
+      this.suppressStickerClick = false;
+      return;
+    }
+    if (sticker.length) {
+      const link = sticker.attr("data-sticker");
+      smile(`[img]${link}[/img]`);
     }
   },
   handleAddButtonClick: function () {
     const link = $(this.stickerInput).val();
-    const isImg = /(^https?:\/\/.*\.(?:png|jpg|gif|webp))$/.test(link);
+    const isImg = this.isValidStickerUrl(link);
 
     if (isImg && !this.userData.includes(link)) {
       this.userData.push(link);
@@ -230,6 +255,200 @@ const hvStickerPack = {
       this.setTab("Свои");
       $(this.stickerInput).val("");
     }
+  },
+  handleToggleCustomEditMode: function () {
+    this.isCustomEditMode = true;
+    this.toggleAddTab(true);
+  },
+  handleCancelCustomEditMode: function () {
+    this.resetCustomEditMode();
+    this.toggleAddTab(true);
+  },
+  handleSaveCustomEditMode: function () {
+    const rawValue = String($(this.bulkInput).val() || "");
+    const links = rawValue
+      .split(/\s+/)
+      .map(item => item.trim())
+      .filter(Boolean)
+      .map(item => item.replace(/^https?:\/\/forumupload.ru\//, 'https://upforme.ru/'))
+      .filter(item => this.isValidStickerUrl(item));
+    const uniqueLinks = Array.from(new Set(links));
+
+    this.userData = uniqueLinks;
+    this.setUserData();
+    this.isCustomEditMode = false;
+    this.setTab("Свои");
+  },
+  isValidStickerUrl: function (url) {
+    return /(^https?:\/\/.*\.(?:png|jpe?g|gif|webp)(?:\?.*)?$)/i.test(url);
+  },
+  resetCustomEditMode: function () {
+    this.isCustomEditMode = false;
+    if (this.bulkInput) {
+      $(this.bulkInput).val(this.userData.join("\n"));
+    }
+  },
+  handleStickerPressStart: function (event) {
+    if (this.activeTab !== "Свои" || this.isCustomEditMode) {
+      return;
+    }
+    if ($(event.target).closest(".hvStickerPackRemoveItem").length) {
+      return;
+    }
+    if (event.type === "mousedown" && event.which !== 1) {
+      return;
+    }
+
+    const item = $(event.currentTarget);
+    const point = this.getEventPoint(event);
+    if (!point) {
+      return;
+    }
+    this.clearDragStartTimer();
+    this.dragState = {
+      item,
+      startX: point.clientX,
+      startY: point.clientY,
+      x: point.clientX,
+      y: point.clientY,
+      offsetX: 0,
+      offsetY: 0,
+      dragging: false,
+      moved: false
+    };
+    this.dragStartTimer = setTimeout(() => {
+      this.startDraggingSticker();
+    }, this.dragLongPressMs);
+  },
+  handleStickerPressMove: function (event) {
+    if (!this.dragState) {
+      return;
+    }
+    const point = this.getEventPoint(event);
+    if (!point) {
+      return;
+    }
+    this.dragState.x = point.clientX;
+    this.dragState.y = point.clientY;
+
+    const deltaX = Math.abs(this.dragState.x - this.dragState.startX);
+    const deltaY = Math.abs(this.dragState.y - this.dragState.startY);
+    if (!this.dragState.dragging && (deltaX > 8 || deltaY > 8)) {
+      this.clearDragStartTimer();
+    }
+    if (!this.dragState.dragging) {
+      return;
+    }
+
+    this.dragState.moved = true;
+    event.preventDefault();
+
+    this.dragState.item.css({
+      left: `${this.dragState.x - this.dragState.offsetX}px`,
+      top: `${this.dragState.y - this.dragState.offsetY}px`
+    });
+
+    const element = document.elementFromPoint(this.dragState.x, this.dragState.y);
+    const target = $(element).closest(".hvStickerPackItem");
+    if (!target.length || target.is(this.dragState.item) || target.hasClass("drag-placeholder")) {
+      return;
+    }
+
+    const rect = target[0].getBoundingClientRect();
+    const rowDelta = Math.abs(this.dragState.y - (rect.top + rect.height / 2));
+    const isUpperRow = this.dragState.y < rect.top + rect.height * 0.25;
+    const isLowerRow = this.dragState.y > rect.bottom - rect.height * 0.25;
+    const insertBefore = isUpperRow || (!isLowerRow && rowDelta < rect.height / 2 && this.dragState.x < rect.left + rect.width / 2);
+
+    if (insertBefore) {
+      target.before(this.dragState.placeholder);
+    } else {
+      target.after(this.dragState.placeholder);
+    }
+  },
+  handleStickerPressEnd: function () {
+    this.clearDragStartTimer();
+    if (!this.dragState) {
+      return;
+    }
+    if (this.dragState.dragging) {
+      this.dragState.item.removeAttr("style").removeClass("dragging");
+      if (this.dragState.placeholder && this.dragState.placeholder.length) {
+        this.dragState.placeholder.replaceWith(this.dragState.item);
+      }
+      this.applyUserDataOrderFromDom();
+      this.setUserData();
+      this.suppressStickerClick = true;
+    }
+    this.dragState = null;
+  },
+  handleStickerPressCancel: function () {
+    this.clearDragStartTimer();
+    if (!this.dragState) {
+      return;
+    }
+    if (this.dragState.dragging) {
+      this.dragState.item.removeAttr("style").removeClass("dragging");
+      if (this.dragState.placeholder && this.dragState.placeholder.length) {
+        this.dragState.placeholder.replaceWith(this.dragState.item);
+      }
+    }
+    this.dragState = null;
+  },
+  clearDragStartTimer: function () {
+    if (this.dragStartTimer) {
+      clearTimeout(this.dragStartTimer);
+      this.dragStartTimer = null;
+    }
+  },
+  startDraggingSticker: function () {
+    if (!this.dragState || this.dragState.dragging) {
+      return;
+    }
+    const item = this.dragState.item;
+    const rect = item[0].getBoundingClientRect();
+    this.dragState.offsetX = this.dragState.x - rect.left;
+    this.dragState.offsetY = this.dragState.y - rect.top;
+    this.dragState.placeholder = $('<div class="hvStickerPackItem drag-placeholder"></div>').css({
+      width: rect.width,
+      height: rect.height,
+      visibility: "hidden"
+    });
+    item.after(this.dragState.placeholder);
+    item.addClass("dragging").css({
+      position: "fixed",
+      left: `${rect.left}px`,
+      top: `${rect.top}px`,
+      width: `${rect.width}px`,
+      height: `${rect.height}px`,
+      zIndex: 9999,
+      pointerEvents: "none",
+      opacity: 0.85
+    });
+    this.dragState.dragging = true;
+  },
+  applyUserDataOrderFromDom: function () {
+    const ordered = [];
+    this.modalContent.find(".hvStickerPackItem").each(function () {
+      const value = $(this).attr("data-sticker");
+      if (value) {
+        ordered.push(value);
+      }
+    });
+    this.userData = ordered;
+  },
+  getEventPoint: function (event) {
+    const source = event.originalEvent || event;
+    if (source.changedTouches && source.changedTouches[0]) {
+      return source.changedTouches[0];
+    }
+    if (source.touches && source.touches[0]) {
+      return source.touches[0];
+    }
+    if (typeof source.clientX === "number" && typeof source.clientY === "number") {
+      return source;
+    }
+    return null;
   },
   setUserData() {
     const value = this.checkedUserData(this.userData);
@@ -298,5 +517,47 @@ const hvStickerPack = {
         $.jGrowl("Твои стикеры не прогрузились, придется пользоваться форумными 😒");
       }
     });
+  },
+  toggleModal: function (isOpened) {
+    const open = typeof isOpened !== "undefined" ? Boolean(isOpened) : !this.isOpened;
+
+    if (open) {
+      const offset = $("#wysi-reply:visible,#main-reply:visible").offset() || $("#post-form").offset();
+      this.modalContainer.css({
+        position: "absolute",
+        top: offset.top,
+        left: offset.left
+      });
+      this.modal.css({
+        width: $("#wysi-reply:visible,#main-reply:visible").width() || $("#post-form").width(),
+      });
+
+      this.setTab(this.activeTab);
+      this.modalContent.on("mousedown touchstart", ".hvStickerPackItem", this.handleStickerPressStart);
+      $(document).on("mousemove touchmove", this.handleStickerPressMove);
+      $(document).on("mouseup touchend", this.handleStickerPressEnd);
+      $(document).on("touchcancel", this.handleStickerPressCancel);
+      $(document).on("click", this.handleOutsideClick);
+      $(document).on("pun_post", this.closeModal);
+      $(document).on("pun_preview", this.closeModal);
+      $(document).on("pun_preedit", this.closeModal);
+      $(document).on("pun_edit", this.closeModal);
+      $(document).on("messenger:post", this.closeModal);
+    } else {
+      this.handleStickerPressCancel();
+      this.modalContent.off("mousedown touchstart", ".hvStickerPackItem", this.handleStickerPressStart);
+      $(document).off("mousemove touchmove", this.handleStickerPressMove);
+      $(document).off("mouseup touchend", this.handleStickerPressEnd);
+      $(document).off("touchcancel", this.handleStickerPressCancel);
+      $(document).off("pun_post", this.closeModal);
+      $(document).off("pun_preview", this.closeModal);
+      $(document).off("pun_preedit", this.closeModal);
+      $(document).off("pun_edit", this.closeModal);
+      $(document).off("messenger:post", this.closeModal);
+      $(document).off("click", this.handleOutsideClick);
+    }
+
+    this.modal.toggleClass("active", open);
+    this.isOpened = open;
   }
 };
