@@ -1,11 +1,10 @@
 ﻿/**
  * Скрипт стикеров
  * автор: Человек-Шаман
- * version: 1.0.9
+ * version: 1.0.10
  *
  * Что нового:
- * 1. Добавлен режим редактирования списка стикеров
- * 2. Добавлен drag and drop для сортировки своих стикеров
+ * 1. Добавлено ограничение на количество загружаемых одноыременно стикеров
  */
 const hvStickerPack = {
   loading: false,
@@ -18,6 +17,10 @@ const hvStickerPack = {
   dragState: null,
   dragStartTimer: null,
   suppressStickerClick: false,
+  renderBatchSize: 10,
+  renderBatchIntervalMs: 100,
+  renderQueueTimer: null,
+  renderSessionId: 0,
 
   init: function (url) {
     if ($("#button-smile").length === 0) return;
@@ -126,6 +129,9 @@ const hvStickerPack = {
   setTab: function (tabName) {
     const self = this;
     this.activeTab = tabName;
+    this.cancelStickerRender();
+    this.renderSessionId += 1;
+    const currentRenderSessionId = this.renderSessionId;
     const isCustomTab = this.activeTab === "Свои";
     if (!isCustomTab) {
       this.resetCustomEditMode();
@@ -144,15 +150,52 @@ const hvStickerPack = {
       }
       : this.data.find(pack => pack.name === self.activeTab);
     $(self.modalContent).empty();
-    pack.stickers.forEach(url => {
-      const removeButton = isCustomTab
-        ? '<span class="hvStickerPackRemoveItem" title="Удалить">x</span>'
-        : '';
-      $(self.modalContent).append(
-        `<div class="hvStickerPackItem" data-sticker="${url}"><img src="${url}">${removeButton}</div>`
-      );
-    });
+    this.renderTabStickers(pack.stickers, isCustomTab, currentRenderSessionId);
     this.toggleAddTab(isCustomTab);
+  },
+  renderTabStickers: function (stickers, isCustomTab, sessionId) {
+    let pointer = 0;
+
+    const renderChunk = () => {
+      if (sessionId !== this.renderSessionId) {
+        return;
+      }
+
+      const chunk = [];
+      const end = Math.min(pointer + this.renderBatchSize, stickers.length);
+      for (let index = pointer; index < end; index++) {
+        const url = stickers[index];
+        chunk.push(this.getStickerItemHtml(url, isCustomTab));
+      }
+      if (chunk.length) {
+        $(this.modalContent).append(chunk.join(""));
+      }
+      pointer = end;
+
+      if (pointer < stickers.length) {
+        this.renderQueueTimer = setTimeout(renderChunk, this.renderBatchIntervalMs);
+      } else {
+        this.renderQueueTimer = null;
+      }
+    };
+
+    if (!stickers.length) {
+      this.renderQueueTimer = null;
+      return;
+    }
+    this.renderQueueTimer = setTimeout(renderChunk, this.renderBatchIntervalMs);
+  },
+  getStickerItemHtml: function (url, isCustomTab) {
+    const removeButton = isCustomTab
+      ? '<span class="hvStickerPackRemoveItem" title="Удалить">x</span>'
+      : '';
+    return `<div class="hvStickerPackItem" data-sticker="${url}"><img src="${url}">${removeButton}</div>`;
+  },
+  cancelStickerRender: function () {
+    if (this.renderQueueTimer) {
+      clearTimeout(this.renderQueueTimer);
+      this.renderQueueTimer = null;
+    }
   },
   toggleAddTab: function (isCustom) {
     const isBulkMode = isCustom && this.isCustomEditMode;
@@ -227,11 +270,14 @@ const hvStickerPack = {
     event.stopPropagation();
     const target = $(event.target).closest(".hvStickerPackRemoveItem");
     if (target.length) {
-      const link = target.closest(".hvStickerPackItem").attr("data-sticker");
+      const stickerItem = target.closest(".hvStickerPackItem");
+      const link = stickerItem.attr("data-sticker");
       const index = this.userData.indexOf(link);
-      this.userData.splice(index, 1);
-      this.setTab("Свои");
-      this.setUserData();
+      if (index !== -1) {
+        this.userData.splice(index, 1);
+        this.setUserData();
+      }
+      stickerItem.remove();
       return;
     }
 
@@ -252,7 +298,7 @@ const hvStickerPack = {
     if (isImg && !this.userData.includes(link)) {
       this.userData.push(link);
       this.setUserData();
-      this.setTab("Свои");
+      $(this.modalContent).append(this.getStickerItemHtml(link, true));
       $(this.stickerInput).val("");
     }
   },
@@ -545,6 +591,7 @@ const hvStickerPack = {
       $(document).on("messenger:post", this.closeModal);
     } else {
       this.handleStickerPressCancel();
+      this.cancelStickerRender();
       this.modalContent.off("mousedown touchstart", ".hvStickerPackItem", this.handleStickerPressStart);
       $(document).off("mousemove touchmove", this.handleStickerPressMove);
       $(document).off("mouseup touchend", this.handleStickerPressEnd);
