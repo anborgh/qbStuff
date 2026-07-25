@@ -174,7 +174,6 @@
 
   /**
    * Список групп: select#fld2 со страницы /userlist.php
-   * (единственный полный список групп на платформе).
    */
   async function loadGroups() {
     if (state.groups) {
@@ -192,7 +191,6 @@
           const rawId = (opt.getAttribute('value') || '').trim();
           const name = (opt.textContent || '').replace(/\s+/g, ' ').trim();
           const id = parseInt(rawId, 10);
-          // пропускаем «Все пользователи» и пустые/служебные значения
           if (!name || !Number.isFinite(id) || id < 1) {
             continue;
           }
@@ -495,10 +493,10 @@
       + "  key: '" + key + "',\n"
       + "  app_id: " + APP_ID + "\n"
       + "}).then(function (result) {\n"
-      + "  var raw = result.response && result.response.storage\n"
+      + "  const raw = result.response && result.response.storage\n"
       + "    && result.response.storage.data\n"
       + "    && result.response.storage.data['" + key + "'];\n"
-      + "  var data = raw ? JSON.parse(raw) : null;\n"
+      + "  const data = raw ? JSON.parse(raw) : null;\n"
       + "});";
 
     root.querySelector('.inner').innerHTML =
@@ -554,8 +552,7 @@
   }
 
   /**
-   * Подключает stylesheet активной формы (один общий <link>).
-   * При смене формы href меняется; без styleUrl — link снимается.
+   * stylesheet активной формы
    */
   function applyFormStyle(styleUrl) {
     const id = 'hvss-form-style';
@@ -897,7 +894,6 @@
       console.error(e);
     }
 
-    // пользователь уже переключил форму / открыл ошибки — не затираем панель
     if (state.activeId !== form.id || state.showErrors) {
       return;
     }
@@ -1031,8 +1027,7 @@
     if (!ulinks) {
       return;
     }
-    // на типовой вёрстке пункт подписки: #h-subscribe
-    // https://houngan.mybb.ru/
+
     const after = ulinks.querySelector('li#h-subscribe')
       || ulinks.querySelector('li#notify-link')
       || ulinks.querySelector('li:last-child');

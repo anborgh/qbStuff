@@ -11,11 +11,11 @@
 
 ## Подключение
 
-В html-верх / объявление / html-низ:
+В html-верх / html-низ:
 
 ```html
 <!-- ОБЩИЕ НАСТРОЙКИ СКРИПТОВ от Человека-Шамана -->
-<script src="https://example.com/hvss-settings.js"></script>
+<script src="https://forumstatic.ru/files/0017/95/29/78079.js"></script>
 <!-- Остальные скрипты с настройками желательно ниже -->
 ```
 
@@ -248,8 +248,6 @@ HvScriptManager.set('myScriptSettings', { enabled: true, limit: 10 });
 
 ## UI и поведение страницы
 
-- Левая колонка — список форм; правая — активная форма.
-- Hash: `/scripts_settings#my-script`, `/scripts_settings#errors`.
 - Рядом с «Сохранить» кнопка **?** — dialog с примером чтения настроек (`HvScriptManager.get('…')` / `storage.get`) с подставленным `storageKey` формы.
 
 
@@ -274,5 +272,3 @@ HvScriptManager.set('myScriptSettings', { enabled: true, limit: 10 });
 
 - Нужен админ (`GroupID === 1`) для UI и записи через токен.
 - Список групп: парсинг `select#fld2` со страницы `/userlist.php` (`value` = id группы, текст = название).
-- `forumlist` / `grouplist` хранят числовые **id**.
-
