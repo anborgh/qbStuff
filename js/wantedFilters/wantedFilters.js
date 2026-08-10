@@ -23,6 +23,7 @@
  *    </script>
  *    в этом примере в тему 999 выведутся заявки из неё и из темы 998
  *    количество тем для сбора не ограничено.
+ *    Форма ответа доступна и в исходных темах массива (998), без списка/фильтров.
  * 2. Добавить в первое сообщение темы поиска
  *    [block=charlist][/block]
  *    там, где нужно отрисовать список ролей
@@ -39,7 +40,8 @@
  * 4.1 После #form-buttons появляется компактная форма:
  *    фандом / имя / тэги → кнопка ↓ вставляет [block=fd|nm|tg]...[/block] в позицию курсора.
  *    Поле тегов в форме есть только если в стартовом посте есть [block=tags][/block].
- *    Без возможности ответа (нет textarea) форма не показывается. * 5. Для стилизации используйте стили
+ *    Без возможности ответа форма не показывается.
+ * 5. Для стилизации используйте стили
  *    .post .charlist { стили блока списка ролей }
  *    .post .charlist .charlist_fd { стили блока фандома }
  *    .post .charlist .charlist_item { стили элемента списка фандома }
@@ -50,6 +52,7 @@
 
 const hvWantedFilters = {
   hasRun: false,
+  _runStarted: false,
   topicId: 0,
   topicData: {
     postCount: 0,
@@ -78,37 +81,70 @@ const hvWantedFilters = {
     const currentTopicId = $topic.length
       ? Number($("#pun-viewtopic").attr("data-topic-id"))
       : 0;
+    if (!currentTopicId) return;
 
-    topicIds.forEach(item => {
-      if (this.hasRun) return;
-      if (
-        (Array.isArray(item) && item[0] === currentTopicId)
-        || item === currentTopicId
-      ) {
-        $(document).on('pun_main_ready', () => this.run(item));
-        this.hasRun = true;
+    let matchedArgs = null;
+    let formOnly = false;
+
+    topicIds.forEach((item) => {
+      if (matchedArgs != null) return;
+
+      if (Array.isArray(item)) {
+        if (item.some((id) => Number(id) === currentTopicId)) {
+          matchedArgs = item;
+          formOnly = Number(item[0]) !== currentTopicId;
+        }
+        return;
+      }
+
+      if (Number(item) === currentTopicId) {
+        matchedArgs = item;
+        formOnly = false;
       }
     });
+
+    if (matchedArgs == null) return;
+
+    this.topicId = Array.isArray(matchedArgs)
+      ? Number(matchedArgs[0])
+      : Number(matchedArgs);
+    this.hasRun = true;
+
+    const start = () => {
+      if (this._runStarted) return;
+      this._runStarted = true;
+      this.run(matchedArgs, { formOnly });
+    };
+
+    $(document).on('pun_main_ready', start);
+    // html-низ часто грузится уже после pun_main_ready — не зависаем с topicId/формой
+    if ($('.topicpost').length) {
+      start();
+    }
   },
   // topicId: number | number[]
-  run: async function(args) {
+  run: async function(args, options = {}) {
     const topicIds = Array.isArray(args) ? args : [args];
-    const topicId = Array.isArray(args) ? args[0] : args;
-    this.bindHandlers();
-    this.setNeddfulElements();
-    this.renderReplyHelper();
+    const topicId = Array.isArray(args) ? Number(args[0]) : Number(args);
+    const formOnly = Boolean(options.formOnly);
 
     this.topicId = topicId;
+    this.bindHandlers();
+    this.setNeddfulElements(formOnly);
+    this.renderReplyHelper();
+
     for (let i = 0; i < topicIds.length; i++) {
       const numReplies = await this.getTopicData(topicIds[i]);
       await this.getPosts(topicIds[i], numReplies);
     }
 
     this.getFandoms();
-    this.renderSummary();
-    this.renderTags();
     this.updateReplyHelperSuggestions();
 
+    if (formOnly) return;
+
+    this.renderSummary();
+    this.renderTags();
     this.initList();
   },
   bindHandlers: function() {
@@ -120,8 +156,9 @@ const hvWantedFilters = {
     this.handleReplySuggestClick = this.handleReplySuggestClick.bind(this);
     this.handleReplyHelperFocusOut = this.handleReplyHelperFocusOut.bind(this);
   },
-  setNeddfulElements: function () {
+  setNeddfulElements: function (formOnly) {
     $('head').append('<link rel="stylesheet" href="https://forumstatic.ru/files/0017/95/29/69365.css?v=1.6" />');
+    if (formOnly) return;
     this.filterList = $('<div class="hvFilteredList"></div>');
     $('.topicpost').after(this.filterList);
   },
@@ -167,7 +204,7 @@ const hvWantedFilters = {
       + '<div class="hvWantedHelper_field">'
       + '<input class="hvWantedHelper_fd" type="text" placeholder="фандом" autocomplete="off" data-suggest="fandom">'
       + '</div>'
-      + '<input class="hvWantedHelper_nm" type="text" placeholder="имя" autocomplete="off">'
+      + '<input class="hvWantedHelper_nm" type="text" placeholder="имя (можно через запятую)" autocomplete="off">'
       + '<button type="button" class="hvWantedHelper_remove" title="Убрать">×</button>'
       + '</div>'
     );
@@ -329,27 +366,63 @@ const hvWantedFilters = {
 
     return chunks.join(' ');
   },
+  findReplyHelperMarkupRanges: function (value) {
+    const re = /\[block=(?:fd|nm|tg)\][\s\S]*?\[\/block\]/gi;
+    const ranges = [];
+    let match;
+
+    while ((match = re.exec(value)) !== null) {
+      ranges.push({
+        start: match.index,
+        end: match.index + match[0].length,
+      });
+    }
+
+    return ranges;
+  },
+  joinReplyHelperMarkup: function (before, markup, after) {
+    const left = before.replace(/[ \t]+$/g, '');
+    const right = after.replace(/^[ \t]+/g, '');
+    const spaceBefore = left && !/\s$/.test(left) ? ' ' : '';
+    const spaceAfter = right && !/^\s/.test(right) ? ' ' : '';
+    return {
+      value: left + spaceBefore + markup + spaceAfter + right,
+      caret: left.length + spaceBefore.length + markup.length,
+    };
+  },
   insertIntoMainReply: function (markup) {
     if (!markup) return;
     const textarea = document.getElementById('main-reply');
     if (!textarea) return;
 
-    const start = textarea.selectionStart ?? textarea.value.length;
-    const end = textarea.selectionEnd ?? textarea.value.length;
     const value = textarea.value;
-    const before = value.slice(0, start);
-    const after = value.slice(end);
-    const needsSpaceBefore = before && !/\s$/.test(before);
-    const needsSpaceAfter = after && !/^\s/.test(after);
-    const insert =
-      (needsSpaceBefore ? ' ' : '')
-      + markup
-      + (needsSpaceAfter ? ' ' : '');
+    const ranges = this.findReplyHelperMarkupRanges(value);
+    let before;
+    let after;
 
-    textarea.value = before + insert + after;
-    const caret = before.length + insert.length;
+    if (ranges.length) {
+      const insertAt = ranges[0].start;
+      let result = '';
+      let cursor = 0;
+      ranges.forEach(({ start, end }) => {
+        if (start < cursor) return;
+        result += value.slice(cursor, start);
+        cursor = end;
+      });
+      result += value.slice(cursor);
+      before = result.slice(0, insertAt);
+      after = result.slice(insertAt);
+    } else {
+      const start = textarea.selectionStart ?? value.length;
+      const end = textarea.selectionEnd ?? value.length;
+      before = value.slice(0, start);
+      after = value.slice(end);
+    }
+
+    const next = this.joinReplyHelperMarkup(before, markup, after);
+    textarea.value = next.value;
     textarea.focus();
-    textarea.setSelectionRange(caret, caret);
+    textarea.setSelectionRange(next.caret, next.caret);
     $(textarea).trigger('input').trigger('change');
   },
   handleReplyHelperInput: function (event) {
